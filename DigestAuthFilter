@@ -1,0 +1,58 @@
+@Component
+public class DigestAuthFilter extends OncePerRequestFilter {
+
+    private final String realm = "MyApp";
+    private final String username = "john";
+    private final String password = "password";
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+
+        String authHeader = request.getHeader("Authorization");
+
+        if (authHeader == null || !authHeader.startsWith("Digest ")) {
+            sendAuthChallenge(response);
+            return;
+        }
+
+        Map<String, String> authMap = parseDigestHeader(authHeader);
+
+        String ha1 = md5(username + ":" + realm + ":" + password);
+        String ha2 = md5(request.getMethod() + ":" + authMap.get("uri"));
+        String validResponse = md5(ha1 + ":" + authMap.get("nonce") + ":" + ha2);
+
+        if (!validResponse.equals(authMap.get("response"))) {
+            sendAuthChallenge(response);
+            return;
+        }
+
+        filterChain.doFilter(request, response);
+    }
+
+    private void sendAuthChallenge(HttpServletResponse response) throws IOException {
+        String nonce = UUID.randomUUID().toString().replace("-", "");
+        response.setHeader("WWW-Authenticate", "Digest realm=\"" + realm + "\", qop=\"auth\", nonce=\"" + nonce + "\"");
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+    }
+
+    private Map<String, String> parseDigestHeader(String header) {
+        header = header.substring(7); // remove "Digest "
+        Map<String, String> map = new HashMap<>();
+        for (String part : header.split(", ")) {
+            String[] kv = part.split("=", 2);
+            map.put(kv[0], kv[1].replaceAll("\"", ""));
+        }
+        return map;
+    }
+
+    private String md5(String data) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(data.getBytes());
+            return DatatypeConverter.printHexBinary(digest).toLowerCase();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
